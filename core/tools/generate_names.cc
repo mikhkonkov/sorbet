@@ -119,6 +119,7 @@ NameDef names[] = {
     {"class_", "class"},
     {"classOf", "class_of"},
     {"selfType", "self_type"},
+    {"attachedClass", "attached_class"},
     {"coerce"},
 
     {"assertType", "assert_type!"},
@@ -403,7 +404,7 @@ NameDef names[] = {
     {"CFGExport", "CFGExport", true},
     {"WithoutRuntime", "WithoutRuntime", true},
     {"Singleton", "Singleton", true},
-    {"AttachedClass", "AttachedClass", true},
+    {"AttachedClass", "<AttachedClass>", true},
 };
 
 void emit_name_header(ostream &out, NameDef &name) {
