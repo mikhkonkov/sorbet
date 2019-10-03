@@ -157,6 +157,8 @@ unique_ptr<Error> matchArgType(Context ctx, TypeConstraint &constr, Loc callLoc,
             e.setHeader("Assigning a value to `{}` that does not match expected type `{}`", argSym.argumentName(ctx),
                         expectedType->show(ctx));
         } else {
+            fmt::print("argTpe.type: {}\n", argTpe.type->toString(ctx));
+            fmt::print("expectedType: {}\n", expectedType->toString(ctx));
             e.setHeader("Expected `{}` but found `{}` for argument `{}`", expectedType->show(ctx),
                         argTpe.type->show(ctx), argSym.argumentName(ctx));
             e.addErrorSection(ErrorSection({
