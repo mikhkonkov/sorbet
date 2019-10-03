@@ -961,6 +961,34 @@ public:
     }
 };
 
+class ResolveAttachedClassWalk {
+public:
+    unique_ptr<ast::ClassDef> preTransformClassDef(core::Context ctx, unique_ptr<ast::ClassDef> original) {
+        // At this point, the type members have been fully processed, so the
+        // AttachedClass template can be resolved
+        auto klass = original->symbol;
+
+        // Because T::Utils::RuntimeProfiled shows up as `T.untyped`, we end up
+        // with a tree that represents a definition of `T.untyped`. This avoids
+        // the problems that show up with that, as `T.untyped` is its own
+        // singleton class.
+        if (klass != core::Symbols::untyped()) {
+            // The resolve constants pass ensures that the singleton exists already
+            auto singleton = klass.data(ctx)->lookupSingletonClass(ctx);
+            ENFORCE(singleton.exists());
+
+            // Update the upper bound of AttachedClass now that all of the other
+            // type members have been defined.
+            auto attachedClass = singleton.data(ctx)->findMember(ctx, core::Names::Constants::AttachedClass());
+            auto *lambdaParam = core::cast_type<core::LambdaParam>(attachedClass.data(ctx)->resultType.get());
+            ENFORCE(lambdaParam != nullptr);
+            lambdaParam->upperBound = klass.data(ctx)->externalType(ctx);
+        }
+
+        return original;
+    }
+};
+
 class ResolveSignaturesWalk {
 private:
     std::vector<int> nestedBlockCounts;
@@ -1553,27 +1581,6 @@ public:
     }
 
     unique_ptr<ast::ClassDef> preTransformClassDef(core::Context ctx, unique_ptr<ast::ClassDef> original) {
-        // At this point, the type members have been fully processed, so the
-        // AttachedClass template can be resolved
-        auto klass = original->symbol;
-
-        // Because T::Utils::RuntimeProfiled shows up as `T.untyped`, we end up
-        // with a tree that represents a definition of `T.untyped`. This avoids
-        // the problems that show up with that, as `T.untyped` is its own
-        // singleton class.
-        if (klass != core::Symbols::untyped()) {
-            // The resolve constants pass ensures that the singleton exists already
-            auto singleton = klass.data(ctx)->lookupSingletonClass(ctx);
-            ENFORCE(singleton.exists());
-
-            // Update the upper bound of AttachedClass now that all of the other
-            // type members have been defined.
-            auto attachedClass = singleton.data(ctx)->findMember(ctx, core::Names::Constants::AttachedClass());
-            auto *lambdaParam = core::cast_type<core::LambdaParam>(attachedClass.data(ctx)->resultType.get());
-            ENFORCE(lambdaParam != nullptr);
-            lambdaParam->upperBound = klass.data(ctx)->externalType(ctx);
-        }
-
         nestedBlockCounts.emplace_back(0);
         return original;
     }
@@ -1829,6 +1836,10 @@ ast::ParsedFilesOrCancelled Resolver::run(core::MutableContext ctx, vector<ast::
     if (ctx.state.wasTypecheckingCanceled()) {
         return ast::ParsedFilesOrCancelled();
     }
+    trees = resolveAttachedClass(ctx, std::move(trees));
+    if (ctx.state.wasTypecheckingCanceled()) {
+        return ast::ParsedFilesOrCancelled();
+    }
     trees = resolveSigs(ctx, std::move(trees));
     if (ctx.state.wasTypecheckingCanceled()) {
         return ast::ParsedFilesOrCancelled();
@@ -1843,6 +1854,16 @@ vector<ast::ParsedFile> Resolver::resolveTypeParams(core::MutableContext ctx, ve
     Timer timeit(ctx.state.errorQueue->logger, "resolver.type_params");
     for (auto &tree : trees) {
         tree.tree = ast::TreeMap::apply(ctx, sigs, std::move(tree.tree));
+    }
+
+    return trees;
+}
+
+vector<ast::ParsedFile> Resolver::resolveAttachedClass(core::MutableContext ctx, vector<ast::ParsedFile> trees) {
+    ResolveAttachedClassWalk attachedClass;
+    Timer timeit(ctx.state.errorQueue->logger, "resolver.attached_class");
+    for (auto &tree : trees) {
+        tree.tree = ast::TreeMap::apply(ctx, attachedClass, std::move(tree.tree));
     }
 
     return trees;
@@ -1883,6 +1904,7 @@ vector<ast::ParsedFile> Resolver::runTreePasses(core::MutableContext ctx, vector
     trees = resolveMixesInClassMethods(ctx, std::move(trees));
     computeLinearization(ctx.state);
     trees = resolveTypeParams(ctx, std::move(trees));
+    trees = resolveAttachedClass(ctx, std::move(trees));
     trees = resolveSigs(ctx, std::move(trees));
     sanityCheck(ctx, trees);
     // This check is FAR too slow to run on large codebases, especially with sanitizers on.
